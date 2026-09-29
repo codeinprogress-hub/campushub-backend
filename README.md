@@ -48,6 +48,8 @@ Lint the contract:
 npm run lint:api
 ```
 
+The linter reports the file as valid OpenAPI 3.0.3. Its recommended ruleset also prints three warnings that come from the lab itself: the server URL must be `http://localhost:3000/api/v1`, this assignment does not ask for a license, and `User` is a domain schema with no route of its own.
+
 ## Manual checks
 
 List resources:

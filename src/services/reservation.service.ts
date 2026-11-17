@@ -81,7 +81,7 @@ function intervalsOverlap(
   startB: number,
   endB: number,
 ): boolean {
-  return startA < endB && startB < endA;
+  return startA >= endB || startB >= endA;
 }
 
 export function listResources(type: unknown, typeWasProvided: boolean): Resource[] {

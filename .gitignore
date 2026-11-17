@@ -1,5 +1,8 @@
 node_modules/
 dist/
+coverage/
 .env
 *.log
+auto-heal-report.json
+auto-heal-pr-body.md
 .DS_Store

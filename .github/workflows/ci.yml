@@ -1,0 +1,151 @@
+# CampusHub CI: lint and Jest on main, then an auto-heal job when Jest fails.
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - 'test/**'
+  pull_request:
+    branches:
+      - main
+
+# contents/pull-requests let the healer push a patch branch and open one PR.
+# models lets the healer call GitHub Models with the built-in token.
+permissions:
+  contents: write
+  pull-requests: write
+  models: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  test:
+    name: Lint and test
+    runs-on: ubuntu-latest
+    outputs:
+      jest_failed: ${{ steps.jest.outputs.jest_failed }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run the linter
+        run: npm run lint
+
+      - name: Run the Jest test suite
+        id: jest
+        run: |
+          set +e
+          set -o pipefail
+          npm test -- --colors=false 2>&1 | tee test-results.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            echo "jest_failed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "jest_failed=false" >> "$GITHUB_OUTPUT"
+          fi
+          exit "$status"
+
+      - name: Upload Jest failure log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: test-results.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  auto-fix:
+    name: Auto-heal failing tests
+    needs: test
+    # Run only after the test job fails, and never on a branch this job already created.
+    if: failure() && needs.test.outputs.jest_failed == 'true' && github.actor != 'github-actions[bot]' && (github.event_name == 'push' && !startsWith(github.ref_name, 'fix/auto-heal-') || github.event_name == 'pull_request' && !startsWith(github.head_ref, 'fix/auto-heal-'))
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the failing revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Download Jest failure log
+        uses: actions/download-artifact@v4
+        with:
+          name: test-results
+          path: .
+        continue-on-error: true
+
+      - name: Generate a source patch from the Jest log
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          AUTO_HEAL_MODEL: openai/gpt-4o-mini
+        run: node scripts/auto-heal.mjs --log test-results.log
+
+      - name: Open the auto-heal pull request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID: ${{ github.run_id }}
+          BASE_BRANCH: ${{ github.event.pull_request.head.ref || github.ref_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ ! -f auto-heal-report.json ]; then
+            echo "The healer did not write a report."
+            exit 1
+          fi
+          if git diff --quiet; then
+            echo "No source patch to commit."
+            exit 0
+          fi
+
+          existing=$(gh pr list --base "$BASE_BRANCH" --state open --json title --jq '[.[] | select(.title | startswith("fix: auto-heal"))] | length')
+          if [ "$existing" != "0" ]; then
+            echo "An auto-heal pull request is already open for ${BASE_BRANCH}."
+            exit 0
+          fi
+
+          branch="fix/auto-heal-${RUN_ID}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add src
+          git commit -m "fix: restore reservation behavior from the Jest failure log"
+          git push origin "$branch"
+
+          body_file="auto-heal-pr-body.md"
+          if [ ! -f "$body_file" ]; then
+            echo "The healer did not write a pull request body."
+            exit 1
+          fi
+          printf '\n\nWorkflow run: %s\n' "$RUN_URL" >> "$body_file"
+
+          gh pr create \
+            --base "$BASE_BRANCH" \
+            --head "$branch" \
+            --title "fix: auto-heal failing reservation tests" \
+            --body-file "$body_file"

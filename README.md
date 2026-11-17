@@ -42,10 +42,17 @@ npm start
 
 `npx ts-node src/server.ts` also starts the server.
 
-Lint the contract:
+Lint the TypeScript sources and the OpenAPI contract:
 
 ```bash
+npm run lint
 npm run lint:api
+```
+
+Run the test suite:
+
+```bash
+npm test
 ```
 
 The linter reports the file as valid OpenAPI 3.0.3. Its recommended ruleset also prints three warnings that come from the lab itself: the server URL must be `http://localhost:3000/api/v1`, this assignment does not ask for a license, and `User` is a domain schema with no route of its own.
@@ -96,12 +103,28 @@ List the student's active reservations:
 curl -X GET "http://localhost:3000/api/v1/reservations/user/user-456"
 ```
 
+## Lab 8: auto-healing CI
+
+`.github/workflows/ci.yml` runs on every push to `main` and on every pull request targeting `main`. The `test` job installs dependencies with `npm ci`, runs `npm run lint`, and runs `npm test`. Jest writes `test-results.log`.
+
+The `auto-fix` job runs only when that Jest step fails (`if: failure()`). It passes the log and the production files under `src/` to `scripts/auto-heal.mjs`. The script asks GitHub Models, OpenAI, or Anthropic — whichever credential the workflow has — to patch the bug without editing tests. If the model is unavailable or its patch still fails Jest, the script repairs the inverted half-open overlap check itself, and only when the log shows both symptoms: a free slot rejected with `409`, and a real overlap accepted. It re-runs Jest and keeps the patch only when the suite passes.
+
+The job then pushes `fix/auto-heal-<run id>` and opens one pull request back into the branch that failed. It does not open a second pull request when one auto-heal request is already open. Review that diff before merging. The pull request body is the audit checklist: production source only, conflict detection repaired rather than removed, and the suite green.
+
+`lab3/` is a separate Lab 3 app and is not part of this workflow.
+
+To exercise the loop, branch `test/breaking-reservation-change` inverts `intervalsOverlap` so non-overlapping bookings throw `409`. Pushing that branch runs CI. `main` keeps the correct predicate, so the workflow stays green there.
+
 ## Repository map
 
 - `docs/openapi.yaml` — OpenAPI 3.0.3 contract
+- `.github/workflows/ci.yml` — lint, Jest, and the conditional auto-heal job
+- `scripts/auto-heal.mjs` — reads `test-results.log` and patches `src/`
 - `src/types/reservation.ts` — TypeScript interfaces for the schemas
 - `src/routes/reservation.routes.ts` — Express routes mounted at `/api/v1`
 - `src/services/reservation.service.ts` — validation and conflict checks
+- `src/services/reservation.service.test.ts` — Jest coverage for those checks
 - `src/models/` — Mongoose schemas aligned with the contract
 - `src/app.ts` — application wiring
 - `src/server.ts` — process entry point
+- `lab3/` — Lab 3 three-tier app, outside this CI workflow

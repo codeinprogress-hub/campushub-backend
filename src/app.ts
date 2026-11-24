@@ -1,4 +1,5 @@
 import express, { NextFunction, Request, Response } from 'express';
+import { resetMemoryStore } from './data/memory-store';
 import { ErrorResponse } from './types/reservation';
 import reservationRouter from './routes/reservation.routes';
 
@@ -25,6 +26,15 @@ export function createApp(): express.Express {
   });
 
   app.use('/api/v1', reservationRouter);
+
+  // Playwright starts the API with E2E=1 so each scenario gets an empty store.
+  // The route is absent unless that variable is set.
+  if (process.env.E2E === '1') {
+    app.post('/api/v1/test/reset', (_req: Request, res: Response) => {
+      resetMemoryStore();
+      res.status(204).end();
+    });
+  }
 
   app.use((req: Request, res: Response) => {
     const body: ErrorResponse = {

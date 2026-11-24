@@ -113,6 +113,25 @@ The job then pushes `fix/auto-heal-<run id>` and opens one pull request back int
 
 `lab3/` is a separate Lab 3 app and is not part of this workflow.
 
+## End-to-end reservation tests
+
+`client/` is the booking desk. It runs at http://localhost:5173 and proxies `/api` to the Express API on port 3000. `e2e/scenarios/reservation.feature` is the Gherkin for the two journeys: a student books Study Room 302 tomorrow at 10:00 AM, and a second student is blocked from a 2:00 PM hold on 3D Printer A. `e2e/reservation.spec.ts` plays those steps with `getByRole`, `getByLabel`, and `getByText`.
+
+Playwright starts both servers. The API process gets `E2E=1`, which exposes `POST /api/v1/test/reset` so each scenario begins with the seeded catalog and no reservations. That route is not registered otherwise. A reservation lasts one hour. The page reads the clock in UTC, so 10:00 is 10:00 AM and 14:00 is 2:00 PM.
+
+```bash
+npm install
+npx playwright install --with-deps
+npm run test:e2e
+```
+
+To click through the desk yourself, start the API and the client in two terminals:
+
+```bash
+npm run dev
+npm run dev:client
+```
+
 To exercise the loop, branch `test/breaking-reservation-change` inverts `intervalsOverlap` so non-overlapping bookings throw `409`. Pushing that branch runs CI. `main` keeps the correct predicate, so the workflow stays green there.
 
 ## Repository map
@@ -125,6 +144,10 @@ To exercise the loop, branch `test/breaking-reservation-change` inverts `interva
 - `src/services/reservation.service.ts` — validation and conflict checks
 - `src/services/reservation.service.test.ts` — Jest coverage for those checks
 - `src/models/` — Mongoose schemas aligned with the contract
+- `client/` — React booking desk (Vite, port 5173)
+- `playwright.config.ts` — boots the API and the client, then runs Chromium, Firefox, and WebKit
+- `e2e/scenarios/reservation.feature` — Gherkin for the success and conflict journeys
+- `e2e/reservation.spec.ts` — Playwright steps for that feature
 - `src/app.ts` — application wiring
 - `src/server.ts` — process entry point
 - `lab3/` — Lab 3 three-tier app, outside this CI workflow

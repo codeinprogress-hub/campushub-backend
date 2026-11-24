@@ -6,3 +6,7 @@ coverage/
 auto-heal-report.json
 auto-heal-pr-body.md
 .DS_Store
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
